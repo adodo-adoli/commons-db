@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% block title %}Setup — {{ schema.display_name }}{% endblock %}
+
+{% block content %}
+<div class="setup-wrap">
+  <h1 class="page-title">Setup</h1>
+  <p class="setup-intro muted">Define your table schema, or import a CSV file to auto-generate the schema and populate the database.</p>
+
+  <div class="setup-tabs">
+    <button class="tab-btn{% if active_tab == 'schema' %} active{% endif %}" data-tab="schema">Edit schema</button>
+    <button class="tab-btn{% if active_tab == 'csv' %} active{% endif %}" data-tab="csv">Import CSV</button>
+  </div>
+
+  {# ── Schema editor panel ─────────────────────────────────────────────── #}
+  <div class="tab-panel" id="tab-schema"{% if active_tab != 'schema' %} style="display:none"{% endif %}>
+    <form method="post" action="{{ url_for('setup_save_schema') }}" id="schema-form">
+      <div class="setup-meta-row">
+        <div class="form-group">
+          <label class="field-label">Table name <span class="muted small">(SQL identifier)</span></label>
+          <input type="text" name="table_name" value="{{ schema.table_name }}" required pattern="[a-zA-Z0-9_]+" placeholder="archive">
+        </div>
+        <div class="form-group">
+          <label class="field-label">Display name</label>
+          <input type="text" name="display_name" value="{{ schema.display_name }}" required placeholder="My Archive">
+        </div>
+        <div class="form-group form-group-wide">
+          <label class="field-label">Description</label>
+          <input type="text" name="description" value="{{ schema.description }}" placeholder="One-line description">
+        </div>
+      </div>
+
+      <h2 class="section-title">Fields</h2>
+      <div class="schema-table-wrap">
+        <table class="schema-table">
+          <thead>
+            <tr>
+              <th>Name <span class="muted small">(SQL col)</span></th>
+              <th>Label</th>
+              <th>Type</th>
+              <th class="col-narrow">Req</th>
+              <th class="col-narrow">Search</th>
+              <th class="col-narrow">Primary</th>
+              <th>Width</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="fields-tbody">
+            {% for f in schema.fields %}
+            <tr class="field-row">
+              <td><input type="text" name="field_name_{{ loop.index0 }}" value="{{ f.name }}" required placeholder="field_name" class="field-name-input mono"></td>
+              <td><input type="text" name="field_label_{{ loop.index0 }}" value="{{ f.label }}" placeholder="Label"></td>
+              <td>
+                <select name="field_type_{{ loop.index0 }}" class="type-select" data-idx="{{ loop.index0 }}">
+                  {% for t in ['text','longtext','integer','url','keywords','image','file','multilingual'] %}
+                  <option value="{{ t }}"{% if f.type == t %} selected{% endif %}>{{ t }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td class="col-narrow"><input type="checkbox" name="field_required_{{ loop.index0 }}"{% if f.required %} checked{% endif %}></td>
+              <td class="col-narrow"><input type="checkbox" name="field_searchable_{{ loop.index0 }}"{% if f.get('searchable', True) %} checked{% endif %}></td>
+              <td class="col-narrow"><input type="checkbox" name="field_primary_{{ loop.index0 }}"{% if f.get('primary') %} checked{% endif %}></td>
+              <td>
+                <select name="field_width_{{ loop.index0 }}">
+                  {% for w in ['sm','md','lg','xl'] %}
+                  <option value="{{ w }}"{% if f.get('width','md') == w %} selected{% endif %}>{{ w }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td>
+                <button type="button" class="btn-remove remove-field" title="Remove field">✕</button>
+              </td>
+            </tr>
+            {% if f.type == 'multilingual' %}
+            <tr class="lang-row" data-for="{{ loop.index0 }}">
+              <td colspan="8" class="lang-cell">
+                <label class="field-label small">Languages JSON</label>
+                <textarea name="field_languages_{{ loop.index0 }}" rows="3" placeholder='[{"code":"en","label":"English"}]'>{{ f.get('languages', []) | tojson }}</textarea>
+              </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <input type="hidden" name="field_count" id="field-count" value="{{ schema.fields | length }}">
+
+      <div class="setup-actions">
+        <button type="button" id="add-field" class="btn-secondary">+ add field</button>
+      </div>
+
+      {% if row_count > 0 %}
+      <div class="danger-zone">
+        <p class="small"><strong>Warning:</strong> The table currently has <strong>{{ row_count }}</strong> row(s). Saving a new schema will drop and recreate the table — all existing rows will be permanently deleted.</p>
+        <label class="confirm-label">
+          <input type="checkbox" name="confirm_wipe" value="yes"> I understand — delete all existing rows and re-initialise
+        </label>
+      </div>
+      {% endif %}
+
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">Save schema &amp; re-initialise</button>
+      </div>
+    </form>
+  </div>
+
+  {# ── CSV import panel ────────────────────────────────────────────────── #}
+  <div class="tab-panel" id="tab-csv"{% if active_tab != 'csv' %} style="display:none"{% endif %}>
+
+    {% if csv_preview is none %}
+    {# Step 1: upload #}
+    <div class="csv-upload-section">
+      <p class="muted small">Upload a CSV file. The first row must be a header. Field types will be inferred automatically — you can edit them before importing.</p>
+      <form method="post" action="{{ url_for('setup_csv_preview') }}" enctype="multipart/form-data">
+        <div class="csv-upload-row">
+          <input type="file" name="csvfile" accept=".csv,text/csv" required class="file-input">
+          <button type="submit" class="btn-primary">Upload &amp; preview</button>
+        </div>
+      </form>
+    </div>
+
+    {% else %}
+    {# Step 2: preview + schema edit + confirm #}
+    <div class="csv-preview-section">
+      <h2 class="section-title">Preview <span class="muted small">(first {{ csv_preview | length }} rows)</span></h2>
+      <div class="csv-preview-scroll">
+        <table class="data-table csv-preview-table">
+          <thead>
+            <tr>
+              {% for f in inferred_schema.fields %}
+              <th>{{ f.label }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in csv_preview %}
+            <tr>
+              {% for f in inferred_schema.fields %}
+              <td>{{ row.get(f.name, '') }}</td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <form method="post" action="{{ url_for('setup_csv_import') }}" id="csv-import-form">
+        <textarea name="csv_raw" style="display:none">{{ csv_raw }}</textarea>
+
+        <h2 class="section-title" style="margin-top:24px">Inferred schema <span class="muted small">(edit before importing)</span></h2>
+        <div class="setup-meta-row">
+          <div class="form-group">
+            <label class="field-label">Table name</label>
+            <input type="text" name="table_name" value="{{ inferred_schema.table_name }}" required pattern="[a-zA-Z0-9_]+">
+          </div>
+          <div class="form-group">
+            <label class="field-label">Display name</label>
+            <input type="text" name="display_name" value="{{ inferred_schema.display_name }}" required>
+          </div>
+          <div class="form-group form-group-wide">
+            <label class="field-label">Description</label>
+            <input type="text" name="description" value="{{ inferred_schema.description }}">
+          </div>
+        </div>
+
+        <div class="schema-table-wrap">
+          <table class="schema-table">
+            <thead>
+              <tr>
+                <th>CSV column</th>
+                <th>Field name</th>
+                <th>Label</th>
+                <th>Type</th>
+                <th class="col-narrow">Req</th>
+                <th class="col-narrow">Search</th>
+                <th>Width</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for f in inferred_schema.fields %}
+              <tr>
+                <td class="mono muted small">{{ f.label }}</td>
+                <td><input type="text" name="field_name_{{ loop.index0 }}" value="{{ f.name }}" required class="field-name-input mono"></td>
+                <td><input type="text" name="field_label_{{ loop.index0 }}" value="{{ f.label }}"></td>
+                <td>
+                  <select name="field_type_{{ loop.index0 }}">
+                    {% for t in ['text','longtext','integer','url','keywords','image','file','multilingual'] %}
+                    <option value="{{ t }}"{% if f.type == t %} selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+                <td class="col-narrow"><input type="checkbox" name="field_required_{{ loop.index0 }}"{% if f.required %} checked{% endif %}></td>
+                <td class="col-narrow"><input type="checkbox" name="field_searchable_{{ loop.index0 }}"{% if f.get('searchable', True) %} checked{% endif %}></td>
+                <td>
+                  <select name="field_width_{{ loop.index0 }}">
+                    {% for w in ['sm','md','lg','xl'] %}
+                    <option value="{{ w }}"{% if f.get('width','md') == w %} selected{% endif %}>{{ w }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+                <input type="hidden" name="field_csv_col_{{ loop.index0 }}" value="{{ f._csv_col }}">
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <input type="hidden" name="field_count" value="{{ inferred_schema.fields | length }}">
+
+        {% if row_count > 0 %}
+        <div class="danger-zone">
+          <p class="small"><strong>Warning:</strong> The table has <strong>{{ row_count }}</strong> existing row(s) that will be deleted.</p>
+          <label class="confirm-label">
+            <input type="checkbox" name="confirm_wipe" value="yes"> I understand — delete all existing rows
+          </label>
+        </div>
+        {% endif %}
+
+        <div class="form-actions">
+          <a href="{{ url_for('admin_setup') }}" class="btn-secondary">← back</a>
+          <button type="submit" class="btn-primary">Import CSV</button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+
+  </div>{# /tab-csv #}
+</div>{# /setup-wrap #}
+
+{# ── New field row template (cloned by JS) ─────────────────────────────── #}
+<template id="field-row-template">
+  <tr class="field-row">
+    <td><input type="text" name="field_name_NEW" required placeholder="field_name" class="field-name-input mono"></td>
+    <td><input type="text" name="field_label_NEW" placeholder="Label"></td>
+    <td>
+      <select name="field_type_NEW" class="type-select">
+        <option value="text">text</option>
+        <option value="longtext">longtext</option>
+        <option value="integer">integer</option>
+        <option value="url">url</option>
+        <option value="keywords">keywords</option>
+        <option value="image">image</option>
+        <option value="file">file</option>
+        <option value="multilingual">multilingual</option>
+      </select>
+    </td>
+    <td class="col-narrow"><input type="checkbox" name="field_required_NEW"></td>
+    <td class="col-narrow"><input type="checkbox" name="field_searchable_NEW" checked></td>
+    <td class="col-narrow"><input type="checkbox" name="field_primary_NEW"></td>
+    <td>
+      <select name="field_width_NEW">
+        <option value="sm">sm</option>
+        <option value="md" selected>md</option>
+        <option value="lg">lg</option>
+        <option value="xl">xl</option>
+      </select>
+    </td>
+    <td><button type="button" class="btn-remove remove-field" title="Remove field">✕</button></td>
+  </tr>
+</template>
+{% endblock %}

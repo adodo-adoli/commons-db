@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Browse — {{ schema.display_name }}{% endblock %}
+
+{% block content %}
+{% if cold_start %}
+<div class="cold-start-banner">
+  <p>No entries yet. Go to <strong>setup</strong> to edit the schema or import a CSV file to get started.</p>
+  <a href="{{ url_for('admin_setup') }}" class="btn-primary-sm">Go to setup →</a>
+</div>
+{% endif %}
+<div class="grid-header">
+  <form class="search-form" method="get" action="{{ url_for('index') }}">
+    <span class="search-icon">/</span>
+    <input type="text" name="q" value="{{ search }}" placeholder="search entries…" class="search-input">
+    {% if search %}<a href="{{ url_for('index') }}" class="search-clear">✕</a>{% endif %}
+  </form>
+  <span class="result-count">{{ total }} entr{{ 'y' if total == 1 else 'ies' }}</span>
+</div>
+
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th class="col-sm">#</th>
+        {% for f in schema.fields %}
+          {% if f.type not in ('longtext', 'multilingual') and f.width != 'xl' %}
+            <th class="col-{{ f.width or 'md' }}">{{ f.label }}</th>
+          {% endif %}
+        {% endfor %}
+        <th class="col-sm">translations</th>
+        <th class="col-sm">updated</th>
+        <th class="col-sm"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="data-row" onclick="window.location='{{ url_for('edit_row', row_id=row.id) }}'">
+        <td class="col-sm muted mono">{{ row.id }}</td>
+        {% for f in schema.fields %}
+          {% if f.type not in ('longtext', 'multilingual') and f.width != 'xl' %}
+            <td class="col-{{ f.width or 'md' }}">
+              {% set val = row[f.name] %}
+              {% if f.type == 'url' and val %}
+                <a href="{{ val }}" target="_blank" onclick="event.stopPropagation()" class="link">↗</a>
+              {% elif f.type == 'image' and val %}
+                <img src="{{ val }}" alt="" class="thumb">
+              {% elif f.type == 'keywords' and val %}
+                {% for kw in (val if val is iterable and val is not string else [val])[:3] %}
+                  <span class="pill">{{ kw }}</span>
+                {% endfor %}
+                {% if val|length > 3 %}<span class="pill muted">+{{ val|length - 3 }}</span>{% endif %}
+              {% else %}
+                <span class="cell-text">{{ val or '' }}</span>
+              {% endif %}
+            </td>
+          {% endif %}
+        {% endfor %}
+        <td class="col-sm">
+          {%- set trans_field = namespace(found=none) %}
+          {%- for f in schema.fields if f.type == 'multilingual' %}
+            {%- set trans_field.found = f %}
+          {%- endfor %}
+          {%- if trans_field.found %}
+            {%- set t = row[trans_field.found.name] %}
+            {%- if t and t is mapping %}
+              {%- for code, val in t.items() if val %}
+                <span class="lang-tag">{{ code }}</span>
+              {%- endfor %}
+            {%- endif %}
+          {%- endif %}
+        </td>
+        <td class="col-sm muted mono small">{{ row.updated_at[:10] if row.updated_at else '' }}</td>
+        <td class="col-sm"><a href="{{ url_for('edit_row', row_id=row.id) }}" class="edit-link" onclick="event.stopPropagation()">edit →</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="20" class="empty-state">No entries found{% if search %} for "{{ search }}"{% endif %}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+  {% if page > 1 %}<a href="?q={{ search }}&page={{ page - 1 }}" class="page-btn">← prev</a>{% endif %}
+  <span class="page-info">{{ page }} / {{ total_pages }}</span>
+  {% if page < total_pages %}<a href="?q={{ search }}&page={{ page + 1 }}" class="page-btn">next →</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Database files — these contain your data; never commit them
+*.db
+*.db-shm
+*.db-wal
+
+# Active schema override — generated at runtime by /admin/setup
+# Commit schema.py (the template default); do NOT commit schema.json (your instance's config)
+schema.json
+
+# Environment / secrets
+.env
+.env.*
+*.secret
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/
+
+# Local backup files
+*.bak

@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}{% if row %}Edit #{{ row.id }}{% else %}New entry{% endif %} — {{ schema.display_name }}{% endblock %}
+
+{% block content %}
+<div class="edit-layout">
+
+  <!-- ── Main form ─────────────────────────────────────────────────── -->
+  <div class="edit-main">
+    <div class="edit-topbar">
+      <a href="{{ url_for('index') }}" class="back-link">← all entries</a>
+      {% if row %}
+        <span class="entry-id mono muted">id: {{ row.id }} · by {{ row.created_by or '?' }} · updated {{ row.updated_at[:16] if row.updated_at else '?' }}</span>
+      {% else %}
+        <span class="entry-id muted">new entry</span>
+      {% endif %}
+    </div>
+
+    {% set readonly = current_user.role == 'viewer' %}
+
+    <form method="post" class="edit-form" id="editForm">
+      <div class="fields-grid">
+        {% for f in schema.fields %}
+          <div class="field-block field-{{ f.width or 'md' }}" data-field="{{ f.name }}">
+            <label class="field-label" for="field_{{ f.name }}">
+              {{ f.label }}
+              {% if f.get('required') %}<span class="required-star">*</span>{% endif %}
+              {% if f.get('primary') %}<span class="primary-badge">primary key</span>{% endif %}
+            </label>
+
+            {# ── multilingual ── #}
+            {% if f.type == 'multilingual' %}
+              <div class="multilingual-wrap">
+                {% set translations = (row[f.name] if row and row[f.name] else {}) %}
+                {# Always show non-empty languages; hide empty ones behind toggle #}
+                {% set langs = f.get('languages', []) %}
+                {% for lang in langs %}
+                  {% set val = translations.get(lang.code, '') %}
+                  <div class="lang-row {% if not val %}lang-row-hidden{% endif %}" data-lang="{{ lang.code }}">
+                    <span class="lang-code {% if lang.code in ('fa','ar') %}rtl{% endif %}">{{ lang.label }}</span>
+                    <input
+                      type="text"
+                      name="{{ f.name }}__{{ lang.code }}"
+                      value="{{ val }}"
+                      placeholder="{{ lang.label }}"
+                      class="lang-input {% if lang.code in ('fa','ar','he') %}input-rtl{% endif %}"
+                      {% if readonly %}disabled{% endif %}
+                      dir="{% if lang.code in ('fa','ar','he') %}rtl{% else %}ltr{% endif %}"
+                    >
+                  </div>
+                {% endfor %}
+                {% if not readonly %}
+                  <button type="button" class="toggle-langs-btn" onclick="toggleHiddenLangs(this)">
+                    + show all languages
+                  </button>
+                {% endif %}
+              </div>
+
+            {# ── keywords ── #}
+            {% elif f.type == 'keywords' %}
+              {% set kws = row[f.name] if row and row[f.name] else [] %}
+              <div class="keywords-wrap" id="kw_{{ f.name }}">
+                <div class="pills-row" id="pills_{{ f.name }}">
+                  {% for kw in kws %}
+                    <span class="pill pill-editable">{{ kw }}{% if not readonly %}<button type="button" class="pill-remove" onclick="removePill(this)">✕</button>{% endif %}</span>
+                  {% endfor %}
+                </div>
+                {% if not readonly %}
+                  <input type="text" class="kw-input" placeholder="add keyword, press Enter"
+                         onkeydown="handleKwInput(event, '{{ f.name }}')" autocomplete="off">
+                {% endif %}
+                <input type="hidden" name="{{ f.name }}" id="kw_hidden_{{ f.name }}"
+                       value="{{ (kws | tojson) if kws else '[]' }}">
+              </div>
+
+            {# ── longtext ── #}
+            {% elif f.type == 'longtext' %}
+              <textarea
+                name="{{ f.name }}"
+                id="field_{{ f.name }}"
+                rows="4"
+                {% if readonly %}disabled{% endif %}
+              >{{ row[f.name] if row and row[f.name] else '' }}</textarea>
+
+            {# ── url ── #}
+            {% elif f.type == 'url' %}
+              <div class="url-wrap">
+                <input
+                  type="url"
+                  name="{{ f.name }}"
+                  id="field_{{ f.name }}"
+                  value="{{ row[f.name] if row and row[f.name] else '' }}"
+                  {% if readonly %}disabled{% endif %}
+                >
+                {% if row and row[f.name] %}
+                  <a href="{{ row[f.name] }}" target="_blank" class="url-open">↗</a>
+                {% endif %}
+              </div>
+
+            {# ── image ── #}
+            {% elif f.type == 'image' %}
+              <div class="image-wrap">
+                <input
+                  type="text"
+                  name="{{ f.name }}"
+                  id="field_{{ f.name }}"
+                  value="{{ row[f.name] if row and row[f.name] else '' }}"
+                  placeholder="URL or path"
+                  {% if readonly %}disabled{% endif %}
+                >
+                {% if row and row[f.name] %}
+                  <img src="{{ row[f.name] }}" alt="" class="image-preview" id="preview_{{ f.name }}">
+                {% else %}
+                  <div class="image-preview image-placeholder" id="preview_{{ f.name }}">no image</div>
+                {% endif %}
+              </div>
+
+            {# ── integer ── #}
+            {% elif f.type == 'integer' %}
+              <input
+                type="number"
+                name="{{ f.name }}"
+                id="field_{{ f.name }}"
+                value="{{ row[f.name] if row and row[f.name] is not none else '' }}"
+                {% if readonly %}disabled{% endif %}
+              >
+
+            {# ── default: text ── #}
+            {% else %}
+              <input
+                type="text"
+                name="{{ f.name }}"
+                id="field_{{ f.name }}"
+                value="{{ row[f.name] if row and row[f.name] else '' }}"
+                {% if f.get('required') %}required{% endif %}
+                {% if readonly %}disabled{% endif %}
+              >
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+
+      {% if not readonly %}
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">Save entry</button>
+        {% if row %}<a href="{{ url_for('index') }}" class="btn-secondary">Cancel</a>{% endif %}
+      </div>
+      {% else %}
+      <p class="readonly-notice">You have viewer access. Contact an admin to request edit permissions.</p>
+      {% endif %}
+    </form>
+  </div>
+
+  <!-- ── History sidebar ──────────────────────────────────────────── -->
+  {% if row and history %}
+  <aside class="history-sidebar">
+    <div class="history-header">
+      <span class="mono">version history</span>
+      <span class="muted small">{{ history|length }} saved</span>
+    </div>
+    <div class="history-list">
+      {% for h in history %}
+      <div class="history-entry {% if loop.first %}history-current{% endif %}">
+        <div class="history-meta">
+          <span class="mono small">{{ h.saved_at[:16] }}</span>
+          <span class="muted small">{{ h.saved_by or '?' }}</span>
+        </div>
+        <div class="history-action">
+          <span class="action-badge action-{{ h.action }}">{{ h.action }}</span>
+          <span class="diff-summary small muted">{{ h.diff_summary }}</span>
+        </div>
+        {% if not loop.first and current_user.role in ('editor', 'admin') %}
+        <form method="post" action="{{ url_for('restore_version', row_id=row.id, history_id=h.history_id) }}"
+              onsubmit="return confirm('Restore this version? Current state will be saved as a new history entry.')">
+          <button type="submit" class="restore-btn">restore ↩</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </aside>
+  {% endif %}
+
+</div>
+{% endblock %}
