@@ -23,16 +23,82 @@ A lightweight web application that gives any group a structured, versioned, sear
 # 1. Clone / copy the project
 git clone <repo> && cd commons-db
 
-# 2. Install dependencies (Python 3.8+)
-pip install flask bcrypt
+# 2. Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
 
-# 3. Run
+# 3. Install dependencies (Python 3.8+)
+pip install flask bcrypt gunicorn
+
+# 4. Run
 python app.py
 ```
 
 Open http://localhost:5050
 
 Default login: **admin / admin** — change this immediately via /admin/users.
+
+## Production deployment (Linux server)
+
+### 1. Open the firewall
+
+```bash
+sudo ufw allow 5050/tcp
+```
+
+If your host has a separate network-level firewall, also open port 5050 there.
+
+### 2. Run as a persistent systemd service
+
+Create `/etc/systemd/system/commons-db.service`:
+
+```ini
+[Unit]
+Description=Commons DB Flask App
+After=network.target
+
+[Service]
+User=YOUR_USERNAME
+WorkingDirectory=/path/to/commons-db
+ExecStart=/path/to/commons-db/.venv/bin/gunicorn -w 2 -b 0.0.0.0:5050 app:app
+Restart=always
+RestartSec=5
+Environment=SECRET_KEY=your-random-secret-here
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Generate a secure `SECRET_KEY`:
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Enable and start:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable commons-db
+sudo systemctl start commons-db
+sudo systemctl status commons-db
+```
+
+Useful commands:
+```bash
+sudo systemctl restart commons-db       # restart after code changes
+sudo journalctl -u commons-db -f        # tail live logs
+```
+
+### 3. Change the default admin password
+
+1. Log in at `http://your-server:5050` with `admin / admin`
+2. Go to `/admin/users` and create a new admin account
+3. Log out, log in with the new account
+4. Delete the default account directly in the database:
+
+```bash
+sqlite3 archive.db "DELETE FROM users WHERE username = 'admin';"
+sqlite3 archive.db "SELECT id, username, role FROM users;"  # verify
+```
 
 ## Customising the schema
 
@@ -134,7 +200,6 @@ sqlite3 archive.db "ALTER TABLE archive ADD COLUMN new_field TEXT;"
 
 ## Roadmap (not in this POC)
 
-- [ ] CSV import
 - [ ] Per-row access control (public/private)
 - [ ] Tor-accessible .onion deployment guide
 - [ ] E2E encryption layer (client-side key derivation)
